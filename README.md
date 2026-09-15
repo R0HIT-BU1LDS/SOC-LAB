@@ -228,7 +228,7 @@ SOC Alert
 
 ## Network Visibility
 
-A packet the sensor was never addressed to can still be seen because the sensor's VirtualBox internal adapter runs in **promiscuous mode ("Allow All")**. The kernel passes the received frames to userspace regardless of destination MAC, so Suricata (AF_PACKET) sees the full traffic on the segment — including Kali ↔ Windows.
+The sensor's internal adapter runs in promiscuous mode, allowing it to observe the Kali → Windows traffic on the lab segment. This visibility was verified with tcpdump before validating Suricata detection.
 
 Raw capture is verified with `tcpdump` on the sensor:
 
@@ -419,7 +419,7 @@ thousands of alerts
 alert fatigue
 ```
 
-This is the case documented here: **one scan ≈ 4,004 Wazuh-visible events.** It is intentionally useful as a learning exercise, but it is **not** ideal production detection. Reducing this per-packet alert volume is future work.
+This is the case documented here: **one scan ≈ 4,004 Wazuh-visible events.** It is intentionally useful as a learning exercise, but it is **not** ideal production detection. Reducing this per-packet alert volume is future work. No Wazuh correlation, thresholding, suppression, or alert aggregation has been implemented yet.
 
 ## Troubleshooting
 
