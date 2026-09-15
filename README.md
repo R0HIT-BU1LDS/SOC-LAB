@@ -45,7 +45,6 @@ This is a *practical SOC engineering project*: it documents an implemented, dete
 - [SOC Investigation](#soc-investigation)
 - [Detection Engineering](#detection-engineering)
 - [Troubleshooting](#troubleshooting)
-- [Screenshots](#screenshots)
 - [Future Improvements](#future-improvements)
 - [Project Report](#project-report)
 - [Security Notice](#security-notice)
@@ -433,51 +432,6 @@ This is the case documented here: **one scan ≈ 4,004 Wazuh-visible events.** I
 | Suricata config test fails | Syntax error in `suricata.yaml` or rules | Fix entry, re-test with `suricata -T` |
 | Massive alert volume | Per-packet rule produces many events | See [Detection Engineering](#detection-engineering) |
 
-## Screenshots
-
-Captures from the running lab:
-
-```
-screenshots/
-├── wazuh-dashboard.png
-├── nmap-scan.png
-├── virtualbox-vms.png
-├── suricata-alert.png
-└── wazuh-suricata-alert.png
-```
-
-### 1. Wazuh Dashboard
-
-![Wazuh Dashboard](screenshots/wazuh-dashboard.png)
-
-The Wazuh Dashboard overview showing the actively connected agents (`ubuntusensor`, Windows 10) and general SIEM monitoring state.
-
-### 2. Nmap Scan
-
-![Nmap Scan](screenshots/nmap-scan.png)
-
-Kali terminal running the controlled SYN scan `nmap -sS -T3 -p 1-1000 192.168.56.13` against the lab Windows endpoint.
-
-### 3. Lab VMs
-
-![VirtualBox VMs](screenshots/virtualbox-vms.png)
-
-All four VMs running together in VirtualBox: UBUNTU SIEM, UBUNTU SENSOR, Kali Linux, and Windows 10.
-
-### 4. Suricata Alert
-
-![Suricata Alert](screenshots/suricata-alert.png)
-
-Suricata detection of the scan in `eve.json`: SID `1000001`, severity `3`, action `allowed`, Kali → Windows addressing.
-
-### 5. Wazuh – Suricata Alert
-
-![Wazuh Suricata Alert](screenshots/wazuh-suricata-alert.png)
-
-Wazuh Discover showing the `rule.groups:suricata` events — the Suricata TCP SYN scan detection surfaced in the Wazuh Dashboard (`agent.name: ubuntusensor`).
-
-> Note: a Snort screenshot is intentionally not included — no Snort alert pipeline is in place yet.
-
 ## Future Improvements
 
 - [ ] Snort integration and testing as a second detection source
@@ -503,6 +457,6 @@ All attack simulations in this project are **restricted to the isolated, authori
 
 ## Author
 
-**ZONNYXXD**
+**ROHIT**
 
 Hands-on blue-team / SOC engineering project.
