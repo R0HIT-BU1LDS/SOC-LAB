@@ -1,2 +1,501 @@
-# SOC-LAB
-Hands-on SOC lab using Wazuh SIEM, Suricata, Snort, Kali Linux and Windows 10.
+# 🛡️ ADVANCED SOC LAB — Wazuh + Suricata + Snort
+
+A hands-on Security Operations Center (SOC) laboratory built with VirtualBox. This project demonstrates the complete blue-team workflow — **attack → network sensor → detection → telemetry → SIEM → alert → SOC investigation** — using real, tested components:
+
+- **Wazuh** (Manager + Indexer + Dashboard) as the SIEM
+- **Suricata** as the network intrusion detection engine (IDS mode)
+- **Snort** (installed, integration in progress)
+- **Kali Linux** as the controlled attacker
+- **Windows 10** as the monitored victim endpoint
+
+This is a *practical SOC engineering project*: it documents an implemented, detected and verified attack scenario end-to-end, including the detection engineering trade-offs that come with real rules.
+
+## Project Status
+
+| Status | Component |
+|--------|-----------|
+| 🟢 Complete / Operational | VirtualBox architecture, network configuration, Wazuh SIEM, Wazuh sensor agent, Windows Wazuh agent, Suricata, network visibility, Nmap test, custom Suricata rule, Suricata EVE JSON, Suricata → Wazuh integration, Wazuh dashboard detection |
+| 🟡 In Progress | Snort integration/testing, Wazuh correlation rules, detection engineering, MITRE ATT&CK expansion |
+| ⚪ Planned | Sysmon, Active Response, TheHive, DVWA, additional sensors, advanced attack scenarios, Ansible/Vagrant automation, Cloud SOC architecture |
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Objectives](#objectives)
+- [Architecture](#architecture)
+- [Network Design](#network-design)
+- [Lab Components](#lab-components)
+- [Data Flow](#data-flow)
+- [Network Visibility](#network-visibility)
+- [Attack Simulation](#attack-simulation)
+- [Custom Suricata Detection Rule](#custom-suricata-detection-rule)
+- [Suricata Detection](#suricata-detection)
+- [Wazuh + Suricata Integration](#wazuh--suricata-integration)
+- [Wazuh Dashboard Detection](#wazuh-dashboard-detection)
+- [SOC Investigation](#soc-investigation)
+- [Detection Engineering](#detection-engineering)
+- [MITRE ATT&CK](#mitre-attack)
+- [Troubleshooting](#troubleshooting)
+- [Screenshots](#screenshots)
+- [Future Improvements](#future-improvements)
+- [Project Report](#project-report)
+- [Security Notice](#security-notice)
+- [Author](#author)
+
+## Overview
+
+Four VirtualBox VMs form an isolated, internal-only simulation of a small enterprise network:
+
+- **UBUNTU SIEM** — hosts the full Wazuh stack
+- **UBUNTU SENSOR** — passive network monitoring with Suricata (and Snort)
+- **Kali Linux** — attacker, running controlled scans
+- **Windows 10** — victim endpoint under observation
+
+The sensor's internal adapter runs in **promiscuous mode**, so it observes packet traffic between Kali and Windows even though the traffic is not addressed to it. Suricata converts that raw network traffic into structured JSON detection events (`eve.json`), which the Wazuh agent on the sensor forwards to the manager and indexer, surfacing them in the Wazuh Dashboard as analyst-reviewable alerts.
+
+## Objectives
+
+- Stand up a complete SOC detection pipeline on low-footprint lab hardware using only VirtualBox.
+- Implement a custom Suricata detection rule and validate it against a controlled Nmap SYN scan.
+- Prove end-to-end telemetry: raw packet → Suricata event → Wazuh event → dashboard alert.
+- Practice SOC investigation workflows: triage fields, correlation, and incident response planning.
+- Learn detection engineering trade-offs (alert volume, thresholding, correlation).
+- Map observed activity to the MITRE ATT&CK framework.
+
+## Architecture
+
+```
+                         ┌─────────────────────────────┐
+                         │         UBUNTU SIEM         │
+                         │        192.168.56.10        │
+                         │                             │
+                         │ Wazuh Manager              │
+                         │ Wazuh Indexer              │
+                         │ Wazuh Dashboard            │
+                         └──────────────┬──────────────┘
+                                        │
+                                        │ Wazuh telemetry
+                                        │
+                         ┌──────────────▼──────────────┐
+                         │       UBUNTU SENSOR         │
+                         │        192.168.56.11        │
+                         │                             │
+                         │ Suricata                   │
+                         │ Snort                      │
+                         │ Wazuh Agent                │
+                         └──────────────┬──────────────┘
+                                        │
+                              VirtualBox "soclab"
+                                        │
+                         ┌──────────────┴──────────────┐
+                         │                             │
+               ┌─────────▼──────────┐       ┌──────────▼─────────┐
+               │     Kali Linux      │       │     Windows 10     │
+               │   192.168.56.12    │       │   192.168.56.13    │
+               │                    │       │                    │
+               │      ATTACKER      │──────►│       VICTIM       │
+               └────────────────────┘       └────────────────────┘
+```
+
+The red arrow represents the attack flow (Kali → Windows). The sensor sits on the same internal broadcast segment and observes that flow via promiscuous capture.
+
+## Network Design
+
+| VM              | IP            | OS               | Role / Components                          | Networking                  |
+|-----------------|---------------|------------------|---------------------------------------------|-----------------------------|
+| UBUNTU SIEM     | 192.168.56.10 | Ubuntu 24.04 LTS | Wazuh Manager, Indexer, Dashboard          | soclab internal + NAT       |
+| UBUNTU SENSOR   | 192.168.56.11 | Ubuntu 24.04 LTS | Suricata, Snort, Wazuh Agent               | soclab internal + NAT (**promiscuous**) |
+| Kali Linux      | 192.168.56.12 | Kali             | Attacker                                    | soclab internal + NAT       |
+| Windows 10      | 192.168.56.13 | Windows 10       | Victim endpoint, Wazuh Agent               | soclab internal + NAT       |
+
+Every VM uses two VirtualBox adapters:
+
+- **Adapter 1 — VirtualBox Internal Network `soclab`**: isolated lab traffic, private `192.168.56.0/24` range.
+- **Adapter 2 — NAT**: internet access for OS and package updates only.
+
+> The UBUNTU SENSOR's internal adapter is set to **Promiscuous Mode: Allow All**, which is what lets it observe Kali → Windows traffic.
+
+## Lab Components
+
+### Wazuh
+
+Open-source SIEM/XDR platform. The **Manager** centralizes and correlates events, the **Indexer** provides the datastore/search engine, and the **Dashboard** gives the analyst UI. Observed Wazuh Manager version: **4.9.2**. Agents are installed on the sensor (Linux) and Windows 10.
+
+### Suricata
+
+Network IDS that reads packets off the wire and matches them against signature rules, emitting structured events. Deployed in **IDS mode** on the sensor with a custom local rule (see below). Version used: **8.0.6**.
+
+### Snort
+
+Classic signature-based IDS/IPS. **Installed on the sensor but not yet fully integrated/tested** — see [Project Status](#project-status). No integration is claimed until it is verified.
+
+### Kali Linux
+
+Attacker VM used exclusively for **controlled, authorized simulations** within the isolated lab network.
+
+### Windows 10
+
+Monitored endpoint (victim). Runs the Wazuh agent so endpoint-side events are visible in the SIEM.
+
+## Data Flow
+
+End-to-end detection pipeline:
+
+```
+Attack
+  ↓
+Network Traffic
+  ↓
+Security Sensor
+  ↓
+Detection
+  ↓
+Telemetry / Logs
+  ↓
+Wazuh Agent
+  ↓
+Wazuh Manager
+  ↓
+Wazuh Indexer
+  ↓
+Wazuh Dashboard
+  ↓
+Alert
+  ↓
+SOC Investigation
+  ↓
+Correlation
+  ↓
+Incident Response
+```
+
+Concretely, for the Nmap scenario (see [attacks/nmap.md](attacks/nmap.md)):
+
+```
+Kali
+ ↓
+Nmap SYN scan
+ ↓
+Windows 10
+ ↓
+soclab network
+ ↓
+UBUNTU SENSOR
+ ↓
+Suricata
+ ↓
+eve.json
+ ↓
+Wazuh Agent
+ ↓
+Wazuh Manager
+ ↓
+Wazuh Indexer
+ ↓
+Wazuh Dashboard
+ ↓
+SOC Alert
+```
+
+## Network Visibility
+
+A packet the sensor was never addressed to can still be seen because the sensor's VirtualBox internal adapter runs in **promiscuous mode ("Allow All")**. The kernel passes the received frames to userspace regardless of destination MAC, so Suricata (AF_PACKET) sees the full traffic on the segment — including Kali ↔ Windows.
+
+Raw capture is verified with `tcpdump` on the sensor:
+
+```bash
+sudo tcpdump -ni enp0s3 'src host 192.168.56.12 and dst host 192.168.56.13'
+```
+
+This confirmed the scan packets were observable before any detection rule processed them — separating **network visibility** (packet capture) from **detection** (signature matching).
+
+## Attack Simulation
+
+A controlled Nmap SYN scan was run from Kali against the lab Windows machine only:
+
+```bash
+nmap -sS -T3 -p 1-1000 192.168.56.13
+```
+
+- `-sS` — TCP SYN scan
+- `-T3` — normal timing
+- `-p 1-1000` — first 1000 ports
+
+The scan targeted no system outside `192.168.56.13`. Results are documented in [attacks/nmap.md](attacks/nmap.md).
+
+## Custom Suricata Detection Rule
+
+Custom rule file: `/var/lib/suricata/rules/local.rules` — see [`suricata/local.rules`](suricata/local.rules).
+
+```suricata
+alert tcp 192.168.56.12 any -> 192.168.56.13 any (msg:"SOC LAB - Kali TCP SYN scan detected"; flags:S; sid:1000001; rev:1;)
+```
+
+### Rule breakdown
+
+| Rule part            | Meaning                                                        |
+|----------------------|----------------------------------------------------------------|
+| `alert`              | Action: log/notify when the rule matches (IDS mode)            |
+| `tcp`                | Protocol being inspected (TCP)                                 |
+| `192.168.56.12`      | Source IP — Kali, the attacker                                 |
+| `any`                | Source port — match any source port                            |
+| `->`                 | Directionality: source → destination                           |
+| `192.168.56.13`      | Destination IP — Windows 10, the victim                        |
+| `any`                | Destination port — match any destination port                  |
+| `msg`                | Human-readable alert text: "SOC LAB - Kali TCP SYN scan detected" |
+| `flags:S`            | Match packets with only the SYN flag set (a scan probe)        |
+| `sid:1000001`        | **Suricata Signature ID (SID)** — unique rule identifier        |
+| `rev:1`              | Rule revision (1)                                              |
+
+> **`1000001` is the Suricata SID.** It identifies the signature in Suricata. Do not confuse it with the Wazuh **rule ID**, which is assigned by the Wazuh engine when the event is correlated (`rule.level`/`rule.id` are Wazuh concepts; `signature_id`/`severity` are Suricata concepts).
+
+> SIDs `1000000+` are reserved for local/custom rules, so they do not collide with the emerging-threats/bundled rulesets.
+
+## Suricata Detection
+
+Suricata emits normalized JSON to the **EVE JSON** log:
+
+```
+/var/log/suricata/eve.json
+```
+
+Active rules directories:
+
+| Path                                             | Purpose            |
+|--------------------------------------------------|--------------------|
+| `/var/lib/suricata/rules/suricata.rules`         | Bundled ruleset    |
+| `/var/lib/suricata/rules/local.rules`            | Custom rules       |
+
+Snapshot of an alert event for the custom rule:
+
+| Field          | Value                                             |
+|----------------|---------------------------------------------------|
+| Source IP      | `192.168.56.12`                                   |
+| Destination IP | `192.168.56.13`                                   |
+| Protocol       | TCP                                               |
+| Signature ID   | `1000001`                                         |
+| Signature      | `SOC LAB - Kali TCP SYN scan detected`            |
+| Severity       | `3`                                               |
+| Action         | `allowed`                                         |
+
+**`allowed` is expected behavior**: the existing deployment runs Suricata as an **IDS**, not an inline IPS, so matched packets are detected and logged rather than dropped. This is a deliberate configuration choice for a detection-focused lab.
+
+## Wazuh + Suricata Integration
+
+The Wazuh Agent on the UBUNTU SENSOR reads the Suricata EVE JSON file with its log collector. The relevant `ossec.conf` block:
+
+```xml
+<localfile>
+  <log_format>json</log_format>
+  <location>/var/log/suricata/eve.json</location>
+</localfile>
+```
+
+Validation and restart:
+
+```bash
+sudo /var/ossec/bin/wazuh-logcollector -t   # config test: passed
+sudo systemctl restart wazuh-agent
+```
+
+After restart the agent was verified as `status='connected'`, and Suricata events from the Nmap scan reached the Wazuh Dashboard.
+
+## Wazuh Dashboard Detection
+
+Searching in Wazuh **Discover**:
+
+```
+rule.groups:suricata
+```
+
+returned the Suricata events — approximately **4,004 events** from the single scan. A representative Wazuh event contains:
+
+| Field                | Value                                                   |
+|----------------------|---------------------------------------------------------|
+| `agent.name`         | `ubuntusensor`                                          |
+| `rule.description`   | `Suricata: Alert - SOC LAB - Kali TCP SYN scan detected`|
+| `rule.level`         | `3`                                                     |
+
+Full end-to-end chain confirmed:
+
+```
+Kali → Nmap SYN scan → Windows 10 → soclab network → UBUNTU SENSOR → Suricata → eve.json → Wazuh Agent → Wazuh Manager → Wazuh Indexer → Wazuh Dashboard → SOC Alert ✓
+```
+
+## SOC Investigation
+
+A SOC analyst receiving this alert works through the classic **5W + How** questions.
+
+### WHO?
+
+- Attacker source IP: `192.168.56.12` (Kali) — internal actor.
+- Reporting agent: `agent.name: ubuntusensor`, `agent.id` identifies the specific sensor node.
+
+### WHAT?
+
+- A TCP SYN probe targeting `192.168.56.13`.
+- Rule: Suricata SID `1000001`, message `SOC LAB - Kali TCP SYN scan detected`.
+- Wazuh `rule.description` and `rule.level` describe how the SIEM classified the event.
+
+### WHEN?
+
+- **`timestamp`** of the event — both the Suricata `timestamp` and the Wazuh ingestion timestamp should be compared to reconstruct scan timing and duration.
+
+### WHERE?
+
+- Source (`srcip`, `srcport`) → destination (`dstip`, `dstport`).
+- Where in the architecture did detection occur: the sensor on `192.168.56.11`, observing internal traffic.
+- `rule.groups` shows which rule family fired (`suricata`).
+
+### HOW?
+
+- Protocol: **`protocol: tcp`** with **`flags: S`** — a rapid series of SYN probes across ports is the fingerprint of scanning, not normal application traffic.
+- Correlate `signature`, `signature_id` (Suricata) and `severity` with the Wazuh enrichment (`rule.id`, `rule.level`, `rule.groups`, `rule.description`).
+
+### WHY?
+
+- Reconnaissance: mapping open ports is the precursor to exploitation. In this lab it is controlled and authorized; in a real environment it would trigger escalation to [Incident Response](#project-report).
+
+### Key alert fields
+
+`timestamp`, `agent.name`, `agent.id`, `rule.id`, `rule.level`, `rule.groups`, `rule.description`, `srcip`, `srcport`, `dstip`, `dstport`, `protocol`, `signature`, `signature_id`, `severity`.
+
+### Event types — do not confuse
+
+| Term                | Meaning                                                                  |
+|---------------------|--------------------------------------------------------------------------|
+| Raw network event   | A packet observed on the wire (via `tcpdump`, never leaves the sensor)   |
+| Suricata alert      | Signature match event emitted by Suricata in `eve.json` (SID, severity)  |
+| Wazuh event         | The JSON document the Wazuh agent collected from `eve.json` and forwarded|
+| Wazuh rule          | Wazuh's own correlation logic/decoder applied to the event (`rule.*`)    |
+| SIEM alert          | The final analyst-facing alert surfaced in the Wazuh Dashboard           |
+
+## Detection Engineering
+
+The custom rule detects **individual SYN packets**. A single Nmap scan generates thousands of packets, so:
+
+```
+1 scan
+ ↓
+thousands of SYN packets
+ ↓
+thousands of alerts
+ ↓
+alert fatigue
+```
+
+This is the case documented here: **one scan ≈ 4,004 Wazuh-visible events.** It is intentionally useful as a learning exercise, but it is **not** ideal production detection.
+
+Desirable improvements (all planned):
+
+- Thresholding
+- Correlation
+- Suppression
+- Time-based detection
+- Wazuh custom rules
+- Alert aggregation
+- False-positive reduction
+- Detection severity tuning
+
+The eventual goal is a correlation outcome that compresses raw signals into one meaningful incident:
+
+```
+Thousands of SYN events
+        ↓
+Correlation
+        ↓
+"Possible Network Service Scanning"
+```
+
+## MITRE ATT&CK
+
+Observed activity is mapped to:
+
+| Technique | ID   | Observed behavior            |
+|-----------|------|------------------------------|
+| Network Service Scanning | [T1046](https://attack.mitre.org/techniques/T1046/) | Nmap `-sS` SYN scan of `192.168.56.13` from `192.168.56.12`, detected by the custom Suricata rule |
+
+Only T1046 is claimed as demonstrated. Additional techniques are **planned** expansion, not implemented.
+
+## Troubleshooting
+
+| Problem | Diagnosis | Solution |
+|---------|-----------|----------|
+| Sensor sees traffic in `tcpdump` but not in Suricata logs | Rule not loaded / config not applied | Include `local.rules` in `suricata.yaml`, reload ruleset, re-run `suricata -T` |
+| No Wazuh events for Suricata alerts | Log collector not watching EVE JSON | Add the `<localfile>` JSON block for `/var/log/suricata/eve.json` |
+| Log collector config validation | Mislabelled `ossec.conf` | `sudo /var/ossec/bin/wazuh-logcollector -t` must return OK before restart |
+| Agent shows disconnected | Agent service / key mismatch | Restart `wazuh-agent`, verify `status='connected'` |
+| Suricata config test fails | Syntax error in `suricata.yaml` or rules | Fix entry, re-test with `suricata -T` |
+| Massive alert volume | Per-packet rule, no correlation | See [Detection Engineering](#detection-engineering) |
+
+## Screenshots
+
+> ⚠️ Placeholder section. No screenshots are committed yet. Add real captures here — see `screenshots/` below for the recommended layout. Never include credentials or agent keys in images.
+
+Recommended files:
+
+```
+screenshots/
+├── architecture.png
+├── network-config.png
+├── nmap-scan.png
+├── suricata-alert.png
+└── wazuh-suricata-alert.png
+```
+
+Each of the following subsections describes what the screenshot should show, to be populated from the running lab.
+
+### Architecture
+
+VirtualBox Manager with the four VMs (UBUNTU SIEM, UBUNTU SENSOR, Kali, Windows 10).
+
+### Network Configuration
+
+VirtualBox network settings for the UBUNTU SENSOR: internal network `soclab`, promiscuous mode "Allow All".
+
+### Nmap Scan
+
+Kali terminal running `nmap -sS -T3 -p 1-1000 192.168.56.13`.
+
+### Suricata Alert
+
+`eve.json` entry showing SID `1000001`, severity `3`, action `allowed`.
+
+### Wazuh – Suricata Alert
+
+Wazuh Discover showing `rule.groups:suricata` with `agent.name: ubuntusensor`.
+
+## Future Improvements
+
+- [ ] Sysmon on Windows endpoint for deep host telemetry
+- [ ] Wazuh Active Response (automated response actions)
+- [ ] TheHive integration for case management
+- [ ] DVWA as an additional controlled attack target
+- [ ] Additional sensors (Zeek, additional Suricata nodes)
+- [ ] Advanced attack scenarios (lateral movement, C2 simulation)
+- [ ] Ansible/Vagrant automation of the lab
+- [ ] Cloud SOC architecture
+- [ ] Custom Wazuh correlation rules (thresholds/suppression)
+- [ ] MITRE ATT&CK expansion beyond T1046
+
+## Project Report
+
+Planned report structure for the deliverables of this project:
+
+1. Executive Summary
+2. Lab Architecture and Network Design
+3. Detection Engineering (rules, alerts, tuning)
+4. Attack Scenario Walkthrough (Nmap SYN scan)
+5. SOC Investigation Narrative (triage of the observed alert)
+6. Incident Response Runbook (containment → eradication → recovery)
+7. Lessons Learned and Future Work
+
+## Security Notice
+
+All attack simulations in this project are **restricted to the isolated, authorized VirtualBox `soclab` lab network**. No external or production systems were targeted. The documented IPs (`192.168.56.10`–`.13`) belong exclusively to this private lab environment. Do not reproduce these techniques outside of an environment you are authorized to test.
+
+## Author
+
+**ZONNYXXD**
+
+Hands-on blue-team / SOC engineering project.

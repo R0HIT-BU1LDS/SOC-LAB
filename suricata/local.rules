@@ -1,0 +1,14 @@
+# ------------------------------------------------------------
+# ADVANCED SOC LAB - Custom Suricata rules
+# Deployment: UBUNTU SENSOR (192.168.56.11)
+# Rules directory: /var/lib/suricata/rules/local.rules
+#
+# NOTE: SID space 1000000-1999999 is reserved for local/user rules.
+# Do NOT confuse the Suricata SID with Wazuh rule IDs.
+# ------------------------------------------------------------
+
+# SOC LAB - Kali TCP SYN scan detection
+# Detects a single TCP SYN packet from the Kali attacker to the Windows victim.
+# Because it alerts per-packet, a full Nmap scan produces thousands of events.
+# See detection-engineering section in the README.
+alert tcp 192.168.56.12 any -> 192.168.56.13 any (msg:"SOC LAB - Kali TCP SYN scan detected"; flags:S; sid:1000001; rev:1;)
