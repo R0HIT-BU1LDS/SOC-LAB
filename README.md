@@ -4,7 +4,7 @@ A hands-on Security Operations Center (SOC) laboratory built with VirtualBox. Th
 
 - **Wazuh** (Manager + Indexer + Dashboard) as the SIEM
 - **Suricata** as the network intrusion detection engine (IDS mode)
-- **Snort** (installed, integration in progress)
+- **Snort** (installed and integration)
 - **Kali Linux** as the controlled attacker
 - **Windows 10** as the monitored victim endpoint
 
