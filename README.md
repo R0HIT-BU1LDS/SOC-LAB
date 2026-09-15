@@ -26,14 +26,6 @@ This is a *practical SOC engineering project*: it documents an implemented, dete
 | Custom Suricata Rule | 🟢 Working |
 | Suricata EVE JSON Logging | 🟢 Working |
 | Suricata → Wazuh Integration | 🟢 Working |
-| Wazuh Correlation Rules | ⚪ Not Implemented |
-| MITRE ATT&CK Mapping | ⚪ Not Implemented |
-| Incident Response | ⚪ Not Implemented |
-| Active Response | ⚪ Not Implemented |
-| Sysmon | ⚪ Not Implemented |
-| TheHive | ⚪ Not Implemented |
-
-Items marked ⚪ are **discussed as future improvements** — they are not claimed as implemented anywhere in this document.
 
 ## Table of Contents
 
@@ -52,7 +44,6 @@ Items marked ⚪ are **discussed as future improvements** — they are not claim
 - [Wazuh Dashboard Detection](#wazuh-dashboard-detection)
 - [SOC Investigation](#soc-investigation)
 - [Detection Engineering](#detection-engineering)
-- [MITRE ATT&CK](#mitre-attack)
 - [Troubleshooting](#troubleshooting)
 - [Screenshots](#screenshots)
 - [Future Improvements](#future-improvements)
@@ -76,9 +67,9 @@ The sensor's internal adapter runs in **promiscuous mode**, so it observes packe
 - Stand up a complete SOC detection pipeline on low-footprint lab hardware using only VirtualBox.
 - Implement a custom Suricata detection rule and validate it against a controlled Nmap SYN scan.
 - Prove end-to-end telemetry: raw packet → Suricata event → Wazuh event → dashboard alert.
-- Practice SOC investigation workflows: triage fields, correlation, and incident response planning.
-- Learn detection engineering trade-offs (alert volume, thresholding, correlation).
-- Map observed activity to the MITRE ATT&CK framework.
+- Practice SOC investigation workflows: triage fields and alert analysis.
+- Learn detection engineering trade-offs when tuning a detection rule.
+- Validate the sensor-and-SIEM detection chain in an isolated environment.
 
 ## Architecture
 
@@ -206,10 +197,6 @@ Wazuh Dashboard
 Alert
   ↓
 SOC Investigation
-  ↓
-Correlation          (planned / future work — not implemented)
-  ↓
-Incident Response    (planned / future work — not implemented)
 ```
 
 Concretely, for the Nmap scenario (see [attacks/nmap.md](attacks/nmap.md)):
@@ -403,7 +390,7 @@ A SOC analyst receiving this alert works through the classic **5W + How** questi
 
 ### WHY?
 
-- Reconnaissance: mapping open ports is the precursor to exploitation. In this lab it is controlled and authorized; in a real environment it would trigger escalation to [Incident Response](#project-report).
+- Reconnaissance: mapping open ports is the precursor to further probing. In this lab the activity is controlled and authorized; in a production environment it would be escalated for review by a senior analyst.
 
 ### Key alert fields
 
@@ -416,7 +403,7 @@ A SOC analyst receiving this alert works through the classic **5W + How** questi
 | Raw network event   | A packet observed on the wire (via `tcpdump`, never leaves the sensor)   |
 | Suricata alert      | Signature match event emitted by Suricata in `eve.json` (SID, severity)  |
 | Wazuh event         | The JSON document the Wazuh agent collected from `eve.json` and forwarded|
-| Wazuh rule          | Wazuh's own correlation logic/decoder applied to the event (`rule.*`)    |
+| Wazuh rule          | Wazuh's built-in rule engine applied to the event (`rule.*`)     |
 | SIEM alert          | The final analyst-facing alert surfaced in the Wazuh Dashboard           |
 
 ## Detection Engineering
@@ -433,38 +420,7 @@ thousands of alerts
 alert fatigue
 ```
 
-This is the case documented here: **one scan ≈ 4,004 Wazuh-visible events.** It is intentionally useful as a learning exercise, but it is **not** ideal production detection.
-
-Desirable improvements (all planned):
-
-- Thresholding
-- Correlation
-- Suppression
-- Time-based detection
-- Wazuh custom rules
-- Alert aggregation
-- False-positive reduction
-- Detection severity tuning
-
-The eventual goal is a correlation outcome that compresses raw signals into one meaningful incident:
-
-```
-Thousands of SYN events
-        ↓
-Correlation
-        ↓
-"Possible Network Service Scanning"
-```
-
-## MITRE ATT&CK
-
-> **Status: ⚪ Not Implemented as integration.** No automatic ATT&CK tagging or MITRE-enabled enrichment is deployed. The mapping below is an **analytical mapping** of the observed Nmap behavior to the framework for portfolio/research reference only.
-
-| Technique | ID   | Observed behavior            |
-|-----------|------|------------------------------|
-| Network Service Scanning | [T1046](https://attack.mitre.org/techniques/T1046/) | Nmap `-sS` SYN scan of `192.168.56.13` from `192.168.56.12`, detected by the custom Suricata rule |
-
-Only T1046 is mapped, and only analytically. Expanding the mapping is **planned** future work.
+This is the case documented here: **one scan ≈ 4,004 Wazuh-visible events.** It is intentionally useful as a learning exercise, but it is **not** ideal production detection. Reducing this per-packet alert volume is future work.
 
 ## Troubleshooting
 
@@ -475,7 +431,7 @@ Only T1046 is mapped, and only analytically. Expanding the mapping is **planned*
 | Log collector config validation | Mislabelled `ossec.conf` | `sudo /var/ossec/bin/wazuh-logcollector -t` must return OK before restart |
 | Agent shows disconnected | Agent service / key mismatch | Restart `wazuh-agent`, verify `status='connected'` |
 | Suricata config test fails | Syntax error in `suricata.yaml` or rules | Fix entry, re-test with `suricata -T` |
-| Massive alert volume | Per-packet rule, no correlation | See [Detection Engineering](#detection-engineering) |
+| Massive alert volume | Per-packet rule produces many events | See [Detection Engineering](#detection-engineering) |
 
 ## Screenshots
 
@@ -524,16 +480,11 @@ Wazuh Discover showing the `rule.groups:suricata` events — the Suricata TCP SY
 
 ## Future Improvements
 
-- [ ] Sysmon on Windows endpoint for deep host telemetry
-- [ ] Wazuh Active Response (automated response actions)
-- [ ] TheHive integration for case management
-- [ ] DVWA as an additional controlled attack target
-- [ ] Additional sensors (Zeek, additional Suricata nodes)
-- [ ] Advanced attack scenarios (lateral movement, C2 simulation)
+- [ ] Snort integration and testing as a second detection source
+- [ ] Reduce the alert volume of the custom SYN-scan rule
+- [ ] Advanced attack scenarios within the lab
 - [ ] Ansible/Vagrant automation of the lab
 - [ ] Cloud SOC architecture
-- [ ] Custom Wazuh correlation rules (thresholds/suppression)
-- [ ] MITRE ATT&CK expansion beyond T1046
 
 ## Project Report
 
@@ -544,8 +495,7 @@ Planned report structure for the deliverables of this project:
 3. Detection Engineering (rules, alerts, tuning)
 4. Attack Scenario Walkthrough (Nmap SYN scan)
 5. SOC Investigation Narrative (triage of the observed alert)
-6. Incident Response Runbook (containment → eradication → recovery)
-7. Lessons Learned and Future Work
+6. Lessons Learned and Future Work
 
 ## Security Notice
 
